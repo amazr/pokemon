@@ -4,36 +4,62 @@ import requests
 import csv
 
 BASE_URL = "https://pokemondb.net"
-LAST_STORED_MON = 898
+LAST_STORED_MON = 0
 
 def isGreaterThan(card, n):
     return int(next(card.find("span", class_="infocard-lg-data").children).text[1:]) > n
 
-def extractCardData(card):
-    img = card.find("span", class_="infocard-lg-img").find("a").find("span")['data-src']
+def getStat(source, stat_str):
+    return [tbody.parent.find("td").text for tbody in source.find_all("th", text=stat_str)]
 
+def extractCardData(card):
     data = card.find("span", class_="infocard-lg-data")
     smalls = data.find_all("small")
     number = smalls[0].text[1:]
-    types = [t.text for t in smalls[1].find_all("a", class_="itype")]
     card_link = data.find("a", class_="ent-name")
-    name = card_link.text
-
     
     dex_page = requests.get(f'{BASE_URL}{card_link["href"]}')
     dex_soup = BeautifulSoup(dex_page.content, "html.parser")
-    hp = dex_soup.find("th", text="HP").parent.find("td").text
-    attack = dex_soup.find("th", text="Attack").parent.find("td").text
-    defense = dex_soup.find("th", text="Defense").parent.find("td").text
-    sp_attack = dex_soup.find("th", text="Sp. Atk").parent.find("td").text
-    sp_def = dex_soup.find("th", text="Sp. Def").parent.find("td").text
-    speed = dex_soup.find("th", text="Speed").parent.find("td").text
-    total = dex_soup.find("th", text="Total").parent.find("td").text
+    names = [name.text for name in dex_soup.find("div", class_="sv-tabs-tab-list") if name != '\n']
+    imgs = [url.find("img")['src'] for url in dex_soup.find_all("picture")[1:]]
+    types = [list(map(lambda x: x.text, tbody.parent.find_all("a"))) for tbody in dex_soup.find_all("th", text="Type") if len(tbody.parent.find_all("a")) > 0]
+    hp = getStat(dex_soup, "HP")
+    attack = getStat(dex_soup, "Attack")
+    defense = getStat(dex_soup, "Defense")
+    sp_atk = getStat(dex_soup, "Sp. Atk")
+    sp_def = getStat(dex_soup, "Sp. Def")
+    speed = getStat(dex_soup, "Speed")
+    total = getStat(dex_soup, "Total")
 
-    row = [number, img, name, hp, attack, defense, sp_attack, sp_def, speed, total]
-    row.extend(types)
-    return row
+    print(f'Returning {number}')
+    return {
+        "num": number,
+        "img_urls": imgs,
+        "names": names,
+        "hp": hp,
+        "attack": attack,
+        "defense": defense,
+        "sp_atk": sp_atk,
+        "sp_def": sp_def,
+        "speed": speed,
+        "total": total,
+        "types": types
+    }
 
+def unpackAndWriteRow(writer, data):
+    for i in range(0, len(data['img_urls'])):
+        row = [data['num']]
+        row.append(data['img_urls'][i])
+        row.append(data['names'][i])
+        row.append(data['hp'][i])
+        row.append(data['attack'][i])
+        row.append(data['defense'][i])
+        row.append(data['sp_atk'][i])
+        row.append(data['sp_def'][i])
+        row.append(data['speed'][i])
+        row.append(data['total'][i])
+        row.extend(data['types'][i])
+        writer.writerow(row)
 
 
 page = requests.get(f'{BASE_URL}/pokedex/national')
@@ -42,11 +68,14 @@ soup = BeautifulSoup(page.content, "html.parser")
 infocards = soup.find_all("div", class_="infocard")
 filtered_infocards = (card for card in infocards if isGreaterThan(card, LAST_STORED_MON))
 
-with ThreadPoolExecutor(max_workers = 100) as executor:
+
+with ThreadPoolExecutor(max_workers = 1000) as executor:
     results = executor.map(extractCardData, filtered_infocards)
 
-with open("output.csv", 'w', newline='') as file:
-    writer = csv.writer(file).writerows(results)
+
+with open("output.csv", 'w', newline='', encoding="utf-8") as file:
+    for result in results:
+        unpackAndWriteRow(csv.writer(file), result)
 
 
 
